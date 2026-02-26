@@ -37,7 +37,9 @@ parseCabalFile cabPath =
 stripInplace :: String -> String
 stripInplace pn = subRegex massagePackageName pn "\\1.cabal"
   where
-    massagePackageName = mkRegex "^([A-Z_a-z0-9-]+)[-]([0-9]+[.])+[0-9]+[-][A-Za-z0-9]*$"
+    massagePackageName =
+      mkRegex
+      "^([A-Z_a-z0-9-]+)[-]([0-9]+[.])+[0-9]+[-]([A-Za-z0-9]{10,}|inplace(-test)?)$"
 
 findCabalFile :: Q FilePath
 findCabalFile = do
