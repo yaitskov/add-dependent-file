@@ -1,0 +1,5 @@
+/result
+*.log
+.haddock-ref
+/dist-newstyle
+/result-2
