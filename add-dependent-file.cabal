@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name:          add-dependent-file
-version:       0.0.1
+version:       0.0.2
 synopsis:      Safer TH addDependentFile wrapper
 description:
     The library provides a safer wrapper around

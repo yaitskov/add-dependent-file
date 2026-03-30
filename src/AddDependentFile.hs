@@ -9,6 +9,7 @@ module AddDependentFile
 import Control.Monad ( unless )
 import Control.Monad.IO.Class ( MonadIO(..) )
 import Data.ByteString qualified as BS
+import Data.List qualified as L
 import Distribution.PackageDescription.Configuration ( flattenPackageDescription )
 import Distribution.Simple.PackageDescription ( readGenericPackageDescription )
 import Distribution.Types.PackageDescription ( PackageDescription(extraSrcFiles) )
@@ -19,7 +20,7 @@ import Language.Haskell.TH.Syntax
     ( Q, location, reportError, Loc(loc_package), runIO )
 import Language.Haskell.TH.Syntax qualified as TH
 import Prelude
-import System.Directory (makeAbsolute)
+import System.Directory (listDirectory, makeAbsolute)
 import System.FilePath ( (</>), addTrailingPathSeparator )
 import Text.Regex ( mkRegex, subRegex )
 
@@ -35,16 +36,29 @@ parseCabalFile cabPath =
   flattenPackageDescription <$> liftIO (readGenericPackageDescription verbose Nothing (makeSymbolicPath cabPath))
 
 stripInplace :: String -> String
-stripInplace pn = subRegex massagePackageName pn "\\1.cabal"
+stripInplace pn = subRegex massagePackageName pn "\\1"
   where
     massagePackageName =
       mkRegex
-      "^([A-Z_a-z0-9-]+)[-]([0-9]+[.])+[0-9]+[-]([A-Za-z0-9]{10,}|inplace)(-test)?$"
+      "^([A-Z_a-z0-9-]+)[-]([0-9]+[.])+[0-9]+.*$"
 
-findCabalFile :: Q FilePath
+findCabalFile :: Q (Either String FilePath)
 findCabalFile = do
-  cabalFileName <- stripInplace . loc_package <$> location
-  (</> cabalFileName) <$> getPackageRoot
+  cabalFileNamePrefix <- stripInplace . loc_package <$> location
+  let cabalFileP fp =
+        cabalFileNamePrefix `L.isPrefixOf` fp && ".cabal" `L.isSuffixOf` fp
+  pkgDir <- getPackageRoot
+  do
+    pkgDirEntries <- filter cabalFileP <$> runIO (listDirectory pkgDir)
+    case pkgDirEntries of
+      [] ->
+        pure . Left $ "No cabal file with prefix [" <> cabalFileNamePrefix
+          <> "] in [" <> pkgDir <> "]"
+      [cfn] ->
+        pure . pure $ pkgDir </> cfn
+      _ ->
+        pure . Left $ "Multiple cabal files with prefix [" <> cabalFileNamePrefix
+          <> "] in [" <> pkgDir <> "]: " <> show pkgDirEntries
 
 assertCabalExtraSourceContains :: FilePath -> FilePath -> Q ()
 assertCabalExtraSourceContains fp cabalFile = do
@@ -64,10 +78,13 @@ addDependentFile p = do
   if isAbsoluteOnAnyPlatform p
     then do
       pRelativeToCabal <- (`stripCommonPrefix` p) . addTrailingPathSeparator <$> getPackageRoot
-      assertCabalExtraSourceContains pRelativeToCabal =<< findCabalFile
+      findCabalFile >>= \case
+        Left e -> reportError e
+        Right cf ->
+          assertCabalExtraSourceContains pRelativeToCabal cf
       TH.addDependentFile p
     else
-    reportError $ "addDependentFile got [" <> p <> "] that is not an absolute path"
+      reportError $ "addDependentFile got [" <> p <> "] that is not an absolute path"
 
 -- | Besides 'addDependentFile' checks, it enusures that consumed content is not changed
 addDependentFile' :: FilePath -> BS.ByteString -> Q ()
